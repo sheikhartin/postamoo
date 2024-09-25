@@ -86,7 +86,7 @@ def create_user_profile(
     db: Session,
     user_profile: schemas.UserProfileCreate,
 ) -> models.UserProfile:
-    db_user_profile = models.UserProfile(**user_profile.dict())
+    db_user_profile = models.UserProfile(**user_profile.model_dump())
     db.add(db_user_profile)
     db.commit()
     db.refresh(db_user_profile)
@@ -113,7 +113,7 @@ def create_post(
             media_files.append(saved_file_name)
 
     db_post = models.Post(
-        **post.dict(exclude={'media_files'}),
+        **post.model_dump(exclude={'media_files'}),
         media_files=media_files,
         author_id=author_id,
     )
@@ -176,7 +176,7 @@ def create_comment(
         )
 
     db_comment = models.Comment(
-        **comment.dict(),
+        **comment.model_dump(),
         post_id=post_id,
         author_id=author_id,
     )
