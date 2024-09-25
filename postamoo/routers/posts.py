@@ -1,4 +1,15 @@
-from fastapi import APIRouter, Response, Depends, HTTPException, status
+from typing import Optional
+
+from fastapi import (
+    APIRouter,
+    Response,
+    Depends,
+    Body,
+    UploadFile,
+    File,
+    HTTPException,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from postamoo import models, schemas, crud
@@ -8,14 +19,12 @@ router = APIRouter()
 
 
 @router.get('/posts/', response_model=list[schemas.Post])
-async def read_posts(
-    db: Session = Depends(get_db),
-):
+async def read_posts(db: Session = Depends(get_db)):
     return crud.get_posts(db=db)
 
 
 @router.get('/posts/{post_id}/', response_model=schemas.Post)
-async def read_post_by_id(
+async def read_post(
     post_id: int,
     db: Session = Depends(get_db),
 ):
@@ -30,15 +39,30 @@ async def read_post_by_id(
 
 @router.post('/posts/', response_model=schemas.Post)
 async def create_post(
-    post: schemas.PostCreate,
+    title: str = Body(...),
+    text_content: Optional[str] = Body(None),
+    media_files: list[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: models.UserProfile = Depends(get_current_user),
 ):
-    return crud.create_post(db=db, post=post, author_id=current_user.id)
+    try:
+        new_post = schemas.PostCreate(
+            title=title,
+            text_content=text_content,
+            media_files=media_files,
+        )
+        return crud.create_post(
+            db=db, post=new_post, author_id=current_user.id
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f'Failed to create post: {str(e)}',
+        )
 
 
 @router.delete('/posts/{post_id}/')
-async def delete_post_by_id(
+async def delete_post(
     post_id: int,
     db: Session = Depends(get_db),
     current_user: models.UserProfile = Depends(get_current_user),
@@ -75,7 +99,7 @@ async def create_comment(
 
 
 @router.delete('/posts/{post_id}/comments/{comment_id}/')
-async def delete_comment_by_id(
+async def delete_comment(
     post_id: int,
     comment_id: int,
     db: Session = Depends(get_db),

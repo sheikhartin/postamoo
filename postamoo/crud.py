@@ -1,9 +1,63 @@
+import os
+import shutil
+import mimetypes
+import uuid
 from typing import Optional
 
-from fastapi import HTTPException, status
-from sqlalchemy.orm import Session, selectinload
+from fastapi import UploadFile, HTTPException, status
+from sqlalchemy.orm import Session
 
 from postamoo import models, schemas
+from postamoo.config import MEDIA_STORAGE_PATH, MAX_IMAGE_SIZE, MAX_VIDEO_SIZE
+
+
+def _create_unique_filename(filename: str) -> str:
+    unique_id = uuid.uuid4().hex[:15]
+    _, file_extension = os.path.splitext(filename)
+    return f'{unique_id}{file_extension}'
+
+
+def _save_media_file(file: UploadFile) -> str:
+    mime_type, _ = mimetypes.guess_type(file.filename)
+    if mime_type in [
+        'image/jpeg',
+        'image/png',
+        'image/gif',
+        'image/bmp',
+    ]:
+        if file.size > MAX_IMAGE_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=(
+                    'Image file size exceeds the limit of '
+                    f'{MAX_IMAGE_SIZE / (1024 * 1024)} MB.'
+                ),
+            )
+    elif mime_type in [
+        'video/mp4',
+        'video/mpeg',
+        'video/quicktime',
+        'video/x-msvideo',
+    ]:
+        if file.size > MAX_VIDEO_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=(
+                    'Video file size exceeds the limit of '
+                    f'{MAX_VIDEO_SIZE / (1024 * 1024)} MB.'
+                ),
+            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Unsupported media type.',
+        )
+
+    filename = _create_unique_filename(file.filename)
+    file_path = os.path.join(MEDIA_STORAGE_PATH, filename)
+    with open(file_path, 'wb') as f:
+        shutil.copyfileobj(file.file, f)
+    return filename
 
 
 def get_user_profile_by_id(
@@ -44,12 +98,7 @@ def get_posts(db: Session) -> Optional[list[models.Post]]:
 
 
 def get_post_by_id(db: Session, post_id: int) -> Optional[models.Post]:
-    return (
-        db.query(models.Post)
-        .options(selectinload(models.Post.comments))
-        .filter(models.Post.id == post_id)
-        .first()
-    )
+    return db.query(models.Post).filter(models.Post.id == post_id).first()
 
 
 def create_post(
@@ -57,7 +106,17 @@ def create_post(
     post: schemas.PostCreate,
     author_id: int,
 ) -> models.Post:
-    db_post = models.Post(**post.dict(), author_id=author_id)
+    media_files = []
+    if post.media_files is not None:
+        for file in post.media_files:
+            saved_file_name = _save_media_file(file)
+            media_files.append(saved_file_name)
+
+    db_post = models.Post(
+        **post.dict(exclude={'media_files'}),
+        media_files=media_files,
+        author_id=author_id,
+    )
     db.add(db_post)
     db.commit()
     db.refresh(db_post)

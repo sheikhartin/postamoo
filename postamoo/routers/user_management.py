@@ -1,7 +1,16 @@
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, Response, Body, HTTPException, status
+from fastapi import (
+    APIRouter,
+    Response,
+    Depends,
+    Body,
+    UploadFile,
+    File,
+    HTTPException,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from postamoo import models, schemas, crud
@@ -19,15 +28,18 @@ async def login(
     db: Session = Depends(get_db),
     client: httpx.AsyncClient = Depends(get_httpx_client),
 ):
-    login_response = await client.post(
-        f'{AUTH_PROVIDER_URL}/login/',
-        json={'username': username, 'password': password},
-    )
-    login_response_content = login_response.json()
-    if login_response.status_code != 200:
-        error_detail = login_response_content.get('detail', 'Login failed.')
+    try:
+        login_response = await client.post(
+            f'{AUTH_PROVIDER_URL}/login/',
+            json={'username': username, 'password': password},
+        )
+        login_response.raise_for_status()
+        login_response_content = login_response.json()
+    except httpx.HTTPError as e:
+        error_response = e.response.json()
+        error_detail = error_response.get('detail', 'Unknown error!')
         raise HTTPException(
-            status_code=login_response.status_code,
+            status_code=e.response.status_code,
             detail=error_detail,
         )
 
@@ -40,20 +52,6 @@ async def login(
             detail='User not found in the Postamoo database.',
         )
 
-    access_token = login_response.cookies.get('access_token')
-    if access_token is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail='Access token not provided by the authentication service.',
-        )
-    response.set_cookie(
-        key='access_token',
-        value=access_token,
-        httponly=True,
-        secure=True,
-        samesite='lax',
-    )
-
     return login_response_content
 
 
@@ -62,14 +60,16 @@ async def logout(
     response: Response,
     client: httpx.AsyncClient = Depends(get_httpx_client),
 ):
-    logout_response = await client.post(f'{AUTH_PROVIDER_URL}/logout/')
-    if logout_response.status_code != 200:
-        error_detail = logout_response.json().get('detail', 'Logout failed.')
+    try:
+        logout_response = await client.post(f'{AUTH_PROVIDER_URL}/logout/')
+        logout_response.raise_for_status()
+    except httpx.HTTPError as e:
+        error_response = e.response.json()
+        error_detail = error_response.get('detail', 'Unknown error!')
         raise HTTPException(
-            status_code=logout_response.status_code,
+            status_code=e.response.status_code,
             detail=error_detail,
         )
-    response.delete_cookie(key='access_token')
     return {'message': 'Logout successful.'}
 
 
@@ -81,27 +81,36 @@ async def create_user(
     display_name: str = Body(...),
     bio: Optional[str] = Body(None),
     location: Optional[str] = Body(None),
+    avatar: UploadFile = File(None),
     db: Session = Depends(get_db),
     client: httpx.AsyncClient = Depends(get_httpx_client),
 ):
-    create_response = await client.post(
-        f'{AUTH_PROVIDER_URL}/users/',
-        data={
-            'username': username,
-            'email': email,
-            'password': password,
-            'display_name': display_name,
-            'bio': bio,
-            'location': location,
-        },
-    )
-    create_response_content = create_response.json()
-    if create_response.status_code != 200:
-        error_detail = create_response_content.get(
-            'detail', 'User creation failed.'
+    files = {}
+    if avatar is not None:
+        await avatar.seek(0)
+        file_content = await avatar.read()
+        files['avatar'] = (avatar.filename, file_content, avatar.content_type)
+
+    try:
+        create_response = await client.post(
+            f'{AUTH_PROVIDER_URL}/users/',
+            data={
+                'username': username,
+                'email': email,
+                'password': password,
+                'display_name': display_name,
+                'bio': bio,
+                'location': location,
+            },
+            files=files,
         )
+        create_response.raise_for_status()
+        create_response_content = create_response.json()
+    except httpx.HTTPError as e:
+        error_response = e.response.json()
+        error_detail = error_response.get('detail', 'Unknown error!')
         raise HTTPException(
-            status_code=create_response.status_code,
+            status_code=e.response.status_code,
             detail=error_detail,
         )
 
@@ -109,6 +118,7 @@ async def create_user(
         new_user_profile = schemas.UserProfileCreate(
             username=create_response_content['username'],
             display_name=create_response_content['profile']['display_name'],
+            avatar=create_response_content['profile']['avatar'],
             bio=create_response_content['profile']['bio'],
             location=create_response_content['profile']['location'],
         )

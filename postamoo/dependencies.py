@@ -37,17 +37,18 @@ async def get_current_user(
     db: Session = Depends(get_db),
     client: httpx.AsyncClient = Depends(get_httpx_client),
 ) -> models.UserProfile:
-    response = await client.get(
-        f'{AUTH_PROVIDER_URL}/users/me/',
-        cookies={'access_token': access_token},
-    )
-    response_content = response.json()
-    if response.status_code != 200:
-        error_detail = response_content.get(
-            'detail', 'Invalid credentials. Please login again.'
+    try:
+        response = await client.get(
+            f'{AUTH_PROVIDER_URL}/users/me/',
+            cookies={'access_token': access_token},
         )
+        response.raise_for_status()
+        response_content = response.json()
+    except httpx.HTTPError as e:
+        error_response = e.response.json()
+        error_detail = error_response.get('detail', 'Unknown error!')
         raise HTTPException(
-            status_code=response.status_code,
+            status_code=e.response.status_code,
             detail=error_detail,
         )
 

@@ -14,7 +14,7 @@ class UserProfileBase(BaseModel):
 
 
 class UserProfileCreate(UserProfileBase):
-    avatar: Optional[UploadFile] = None
+    pass
 
 
 class UserProfile(UserProfileBase):
