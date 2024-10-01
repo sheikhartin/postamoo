@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from postamoo import models, schemas, crud
 from postamoo.dependencies import get_db, get_httpx_client, get_current_user
-from postamoo.config import AUTH_PROVIDER_URL
+from postamoo.config import DEBUG_ENABLED, AUTH_PROVIDER_URL
 
 router = APIRouter()
 
@@ -51,6 +51,15 @@ async def login(
             status_code=status.HTTP_404_NOT_FOUND,
             detail='User not found in the Postamoo database.',
         )
+
+    access_token = login_response.cookies.get('access_token')
+    response.set_cookie(
+        key='access_token',
+        value=access_token,
+        httponly=True,
+        secure=False if DEBUG_ENABLED else True,
+        samesite='lax',
+    )
 
     return login_response_content
 
